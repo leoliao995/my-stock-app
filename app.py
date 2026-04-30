@@ -5,7 +5,7 @@ import numpy as np
 from scipy.stats import norm
 from datetime import datetime
 
-# --- 核心運算邏輯 (保持與你原本的一致) ---
+# --- 核心運算邏輯 ---
 def calculate_call_delta(S, K, T, r, sigma):
     if T <= 0 or sigma <= 0: return 0.0
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -47,7 +47,6 @@ if st.button('🚀 立即更新即時數據'):
                         calls = opt_chain.calls
                         T_years = dte / 365.0
                         
-                        # 計算 Delta
                         calls['Delta'] = calls.apply(lambda r: calculate_call_delta(current_price, r['strike'], T_years, 0.045, r['impliedVolatility']), axis=1)
                         safe_calls = calls[calls['strike'] > current_price].copy().sort_values('strike').reset_index(drop=True)
                         
@@ -61,14 +60,18 @@ if st.button('🚀 立即更新即時數據'):
                                 roi = (mid / current_price) * (365 / max(1, dte)) * 100
                                 return {"strike": c['strike'], "mid": mid, "delta": c['Delta'], "roi": roi}
 
-                            ops = {"保守型": get_data(best_idx+1), "一般型": get_data(best_idx), "積極型": get_data(best_idx-1)}
+                            # 🚀 這裡就是調整順序的地方
+                            ops = {
+                                "一般型": get_data(best_idx), 
+                                "保守型": get_data(best_idx + 1), 
+                                "積極型": get_data(best_idx - 1)
+                            }
                             
                             row = {"代號": symbol, "現價": round(current_price, 2), "到期日": f"{date_str}({dte}d)"}
                             for k, v in ops.items():
                                 if v:
                                     txt = f"${v['strike']}(${v['mid']}) - Δ{v['delta']:.4f}({v['roi']:.1f}%)"
                                     row[k] = txt
-                                    # 尋找最佳解
                                     if v['roi'] >= min_roi:
                                         score = abs(v['delta'] - 0.1)
                                         if score < best_score:
@@ -79,13 +82,14 @@ if st.button('🚀 立即更新即時數據'):
             except Exception as e:
                 st.error(f"無法抓取 {symbol}: {e}")
 
-    # 顯示結果
     if results:
         if best_option:
             st.success(f"🏆 本日最推薦：{best_option['stock']} -> {best_option['text']}")
         
         df_display = pd.DataFrame(results)
-        st.dataframe(df_display, use_container_width=True)
-        st.balloons() # 算完撒個氣球慶祝一下
+        # 指定列的顯示順序
+        cols = ["代號", "現價", "到期日", "一般型", "保守型", "積極型"]
+        st.dataframe(df_display[cols], use_container_width=True)
+        st.balloons()
     else:
         st.warning("目前沒有符合條件的標的。")
