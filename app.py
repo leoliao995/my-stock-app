@@ -5,7 +5,7 @@ import numpy as np
 from scipy.stats import norm
 from datetime import datetime
 
-# --- 核心運算邏輯 ---
+# --- 核心運算邏輯 (Black-Scholes Delta) ---
 def calculate_call_delta(S, K, T, r, sigma):
     if T <= 0 or sigma <= 0: return 0.0
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
@@ -13,10 +13,10 @@ def calculate_call_delta(S, K, T, r, sigma):
 
 # --- App 介面設定 ---
 st.set_page_config(page_title="美股收租即時儀表板", layout="wide")
-st.title("📊 美股收租即時掃描器")
+st.title("📊 美股收租即時掃描器 (下單增強版)")
 st.write(f"目前時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# 側邊欄設定
+# 側邊欄參數 (方便調整)
 with st.sidebar:
     st.header("⚙️ 參數設定")
     tickers_input = st.text_input("股票池 (逗號分隔)", "TSM,GOOG,AAPL,NVDA,MSFT,AMZN")
@@ -47,6 +47,7 @@ if st.button('🚀 立即更新即時數據'):
                         calls = opt_chain.calls
                         T_years = dte / 365.0
                         
+                        # 計算 Delta
                         calls['Delta'] = calls.apply(lambda r: calculate_call_delta(current_price, r['strike'], T_years, 0.045, r['impliedVolatility']), axis=1)
                         safe_calls = calls[calls['strike'] > current_price].copy().sort_values('strike').reset_index(drop=True)
                         
@@ -58,12 +59,12 @@ if st.button('🚀 立即更新即時數據'):
                                 c = safe_calls.iloc[idx]
                                 mid = round((c['bid'] + c['ask']) / 2, 2)
                                 roi = (mid / current_price) * (365 / max(1, dte)) * 100
-                                return {"strike": c['strike'], "mid": mid, "delta": c['Delta'], "roi": roi}
+                                return {"strike": c['strike'], "mid": mid, "delta": c['Delta'], "roi": roi, "dte": dte, "exp": date_str}
 
-                            # 🚀 這裡就是調整順序的地方
+                            # 按照你的需求排序：一般 -> 保守 -> 積極
                             ops = {
-                                "一般型": get_data(best_idx), 
-                                "保守型": get_data(best_idx + 1), 
+                                "一般型": get_data(best_idx),
+                                "保守型": get_data(best_idx + 1),
                                 "積極型": get_data(best_idx - 1)
                             }
                             
@@ -72,24 +73,51 @@ if st.button('🚀 立即更新即時數據'):
                                 if v:
                                     txt = f"${v['strike']}(${v['mid']}) - Δ{v['delta']:.4f}({v['roi']:.1f}%)"
                                     row[k] = txt
+                                    # 篩選最佳推薦標的
                                     if v['roi'] >= min_roi:
                                         score = abs(v['delta'] - 0.1)
                                         if score < best_score:
                                             best_score = score
-                                            best_option = {"stock": symbol, "text": txt, "roi": v['roi']}
+                                            best_option = {
+                                                "stock": symbol, 
+                                                "text": txt, 
+                                                "strike": v['strike'], 
+                                                "mid": v['mid'], 
+                                                "exp": v['exp'],
+                                                "type": k
+                                            }
                             results.append(row)
                         break
             except Exception as e:
                 st.error(f"無法抓取 {symbol}: {e}")
 
+    # 顯示主報表
     if results:
         if best_option:
             st.success(f"🏆 本日最推薦：{best_option['stock']} -> {best_option['text']}")
         
         df_display = pd.DataFrame(results)
-        # 指定列的顯示順序
         cols = ["代號", "現價", "到期日", "一般型", "保守型", "積極型"]
         st.dataframe(df_display[cols], use_container_width=True)
+        
+        # --- 🚀 下單傳送門區域 ---
+        if best_option:
+            st.markdown("---")
+            st.subheader(f"⚡ 快速下單傳送門 ({best_option['stock']})")
+            
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                # 生成 Firstrade 手機版網頁的深層連結
+                ft_url = f"https://invest.firstrade.com/cgi-bin/main#/trade/option/{best_option['stock']}"
+                st.link_button(f"🔗 開啟 Firstrade 交易 {best_option['stock']}", ft_url)
+                st.info("💡 點擊上方按鈕可直接跳轉至該股票期權頁面")
+            
+            with c2:
+                # 建立方便複製的指令字串
+                cmd = f"{best_option['stock']} | Sell Open | {best_option['exp']} | Strike: ${best_option['strike']} | Limit: ${best_option['mid']}"
+                st.write("📋 下單指令 (點擊右上角按鈕複製):")
+                st.code(cmd, language='text')
+                
         st.balloons()
     else:
         st.warning("目前沒有符合條件的標的。")
